@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: usdc_trading
+      POSTGRES_USER: ${DB_USER:-usdc_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-usdc_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      CIRCLE_API_KEY: ${CIRCLE_API_KEY}
+      CIRCLE_API_URL: ${CIRCLE_API_URL:-https://api.circle.com}
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
+      DB_URL: jdbc:postgresql://postgres:5432/usdc_trading
+      DB_USER: ${DB_USER:-usdc_user}
+      DB_PASSWORD: ${DB_PASSWORD:-usdc_password}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      VITE_CIRCLE_API_KEY: ${CIRCLE_API_KEY}
+      VITE_ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
+      VITE_BACKEND_URL: http://localhost:8080
+    ports:
+      - "3000:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+
+volumes:
+  postgres_data:

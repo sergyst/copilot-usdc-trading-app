@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: usdc-trading-app
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/usdc_trading}
+    username: ${DB_USER:usdc_user}
+    password: ${DB_PASSWORD:usdc_password}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+
+  security:
+    jwt:
+      secret: ${JWT_SECRET:your-secret-key-change-in-production}
+      expiration: 86400000  # 24 hours
+
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+circle:
+  api-key: ${CIRCLE_API_KEY}
+  api-url: ${CIRCLE_API_URL:https://api.circle.com}
+  version: v1
+
+ethereum:
+  rpc-url: ${ETHEREUM_RPC_URL:https://eth-mainnet.alchemyapi.io/v2/demo}
+  chain-id: 1
+  usdc-contract-address: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+
+logging:
+  level:
+    root: INFO
+    com.usdctrading: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
