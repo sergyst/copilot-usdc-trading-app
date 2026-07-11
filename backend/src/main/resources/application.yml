@@ -27,8 +27,8 @@ server:
 
 circle:
   api-key: ${CIRCLE_API_KEY}
-  api-url: ${CIRCLE_API_URL:https://api.circle.com}
-  version: v1
+  api-url: ${CIRCLE_API_URL:https://api.sandbox.circle.com}
+  version: ${CIRCLE_VERSION:v1}
 
 ethereum:
   rpc-url: ${ETHEREUM_RPC_URL:https://eth-mainnet.alchemyapi.io/v2/demo}
@@ -39,5 +39,6 @@ logging:
   level:
     root: INFO
     com.usdctrading: DEBUG
+    org.springframework.web.reactive.function.client.ExchangeFunctions: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"

@@ -4,7 +4,10 @@ import com.usdctrading.dto.BuyUsdcRequest;
 import com.usdctrading.dto.SellUsdcRequest;
 import com.usdctrading.dto.TransactionResponse;
 import com.usdctrading.dto.OrderResponse;
+import com.usdctrading.dto.circle.CircleTransferResponse;
+import com.usdctrading.dto.circle.CirclePaymentResponse;
 import com.usdctrading.entity.*;
+import com.usdctrading.exception.CircleApiException;
 import com.usdctrading.repository.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,7 +50,7 @@ public class TradeService {
      */
     @Transactional
     public OrderResponse buyUsdc(Long userId, BuyUsdcRequest request) {
-        log.info("Processing buy USDC request for user: {}", userId);
+        log.info("Processing buy USDC request for user: {} with amount: {}", userId, request.getAmount());
 
         // Validate user
         User user = userRepository.findById(userId)
@@ -98,29 +101,57 @@ public class TradeService {
 
         // Call Circle API to process payment
         try {
-            String circleTransferId = processCircleTransfer(
-                    wallet.getWalletAddress(),
-                    request.getAmount(),
-                    request.getPaymentMethod()
+            // Step 1: Create or get wallet in Circle
+            String circleWalletId = getOrCreateCircleWallet(wallet);
+
+            // Step 2: Process payment (buy USDC)
+            CirclePaymentResponse.PaymentData payment = circleService.processPayment(
+                    request.getAmount().toString(),
+                    request.getPaymentMethod(), // Should map to Circle card/ACH ID
+                    mapPaymentMethod(request.getPaymentMethod()),
+                    "Buy USDC tokens"
             );
 
-            // Update transaction with Circle transfer ID
-            savedTransaction.setTransactionHash(circleTransferId);
-            savedTransaction.setStatus(Transaction.TransactionStatus.PROCESSING);
+            // Step 3: Monitor payment status
+            if ("confirmed".equalsIgnoreCase(payment.getStatus())) {
+                // Step 4: Transfer USDC to user's wallet
+                CircleTransferResponse.TransferData transfer = circleService.transferUsdc(
+                        "circle_master_wallet", // Master wallet ID (configure in Circle)
+                        circleWalletId,
+                        request.getAmount(),
+                        "wallet",
+                        "wallet"
+                );
+
+                // Update transaction with Circle transfer ID
+                savedTransaction.setTransactionHash(transfer.getTransactionHash());
+                savedTransaction.setStatus(Transaction.TransactionStatus.PROCESSING);
+                transactionRepository.save(savedTransaction);
+
+                // Update order status
+                savedOrder.setStatus(Order.OrderStatus.PARTIALLY_FILLED);
+                savedOrder.setFilledQuantity(request.getAmount());
+                orderRepository.save(savedOrder);
+
+                // Update wallet balance
+                wallet.setUsdcBalance(wallet.getUsdcBalance().add(request.getAmount()));
+                walletRepository.save(wallet);
+
+                log.info("Buy USDC transaction completed successfully. Transfer ID: {}", transfer.getId());
+            } else {
+                throw new CircleApiException("Payment confirmation failed. Status: " + payment.getStatus());
+            }
+        } catch (CircleApiException e) {
+            log.error("Circle API error processing buy USDC: {}", e.getCircleErrorMessage());
+            savedTransaction.setStatus(Transaction.TransactionStatus.FAILED);
             transactionRepository.save(savedTransaction);
 
-            // Update order status
-            savedOrder.setStatus(Order.OrderStatus.PARTIALLY_FILLED);
-            savedOrder.setFilledQuantity(request.getAmount());
+            savedOrder.setStatus(Order.OrderStatus.FAILED);
             orderRepository.save(savedOrder);
 
-            // Update wallet balance
-            wallet.setUsdcBalance(wallet.getUsdcBalance().add(request.getAmount()));
-            walletRepository.save(wallet);
-
-            log.info("Buy USDC transaction completed successfully");
+            throw e;
         } catch (Exception e) {
-            log.error("Error processing Circle transfer", e);
+            log.error("Error processing buy USDC order", e);
             savedTransaction.setStatus(Transaction.TransactionStatus.FAILED);
             transactionRepository.save(savedTransaction);
 
@@ -139,7 +170,7 @@ public class TradeService {
      */
     @Transactional
     public OrderResponse sellUsdc(Long userId, SellUsdcRequest request) {
-        log.info("Processing sell USDC request for user: {}", userId);
+        log.info("Processing sell USDC request for user: {} with amount: {}", userId, request.getAmount());
 
         // Validate user
         User user = userRepository.findById(userId)
@@ -196,29 +227,49 @@ public class TradeService {
 
         // Call Circle API to process transfer
         try {
-            String circleTransferId = processCircleTransfer(
-                    request.getRecipientAddress(),
+            // Step 1: Get Circle wallet for user
+            String circleWalletId = getOrCreateCircleWallet(wallet);
+
+            // Step 2: Transfer USDC from user wallet to master wallet
+            CircleTransferResponse.TransferData transfer = circleService.transferUsdc(
+                    circleWalletId,
+                    "circle_master_wallet",
                     request.getAmount(),
-                    "BLOCKCHAIN"
+                    "wallet",
+                    "wallet"
             );
 
-            // Update transaction
-            savedTransaction.setTransactionHash(circleTransferId);
-            savedTransaction.setStatus(Transaction.TransactionStatus.PROCESSING);
+            // Step 3: Monitor transfer status
+            if ("complete".equalsIgnoreCase(transfer.getStatus()) || "pending".equalsIgnoreCase(transfer.getStatus())) {
+                // Update transaction
+                savedTransaction.setTransactionHash(transfer.getTransactionHash());
+                savedTransaction.setStatus(Transaction.TransactionStatus.PROCESSING);
+                transactionRepository.save(savedTransaction);
+
+                // Update order status
+                savedOrder.setStatus(Order.OrderStatus.PARTIALLY_FILLED);
+                savedOrder.setFilledQuantity(request.getAmount());
+                orderRepository.save(savedOrder);
+
+                // Update wallet balance (deduct USDC)
+                wallet.setUsdcBalance(wallet.getUsdcBalance().subtract(request.getAmount()));
+                walletRepository.save(wallet);
+
+                log.info("Sell USDC transaction completed successfully. Transfer ID: {}", transfer.getId());
+            } else {
+                throw new CircleApiException("Transfer failed. Status: " + transfer.getStatus());
+            }
+        } catch (CircleApiException e) {
+            log.error("Circle API error processing sell USDC: {}", e.getCircleErrorMessage());
+            savedTransaction.setStatus(Transaction.TransactionStatus.FAILED);
             transactionRepository.save(savedTransaction);
 
-            // Update order status
-            savedOrder.setStatus(Order.OrderStatus.PARTIALLY_FILLED);
-            savedOrder.setFilledQuantity(request.getAmount());
+            savedOrder.setStatus(Order.OrderStatus.FAILED);
             orderRepository.save(savedOrder);
 
-            // Update wallet balance (deduct USDC)
-            wallet.setUsdcBalance(wallet.getUsdcBalance().subtract(request.getAmount()));
-            walletRepository.save(wallet);
-
-            log.info("Sell USDC transaction completed successfully");
+            throw e;
         } catch (Exception e) {
-            log.error("Error processing Circle transfer for sell", e);
+            log.error("Error processing sell USDC order", e);
             savedTransaction.setStatus(Transaction.TransactionStatus.FAILED);
             transactionRepository.save(savedTransaction);
 
@@ -296,13 +347,20 @@ public class TradeService {
     }
 
     /**
-     * Process Circle API transfer
-     * This is a placeholder - implement according to Circle API documentation
+     * Get or create Circle wallet for user
      */
-    private String processCircleTransfer(String address, BigDecimal amount, String paymentMethod) {
-        log.info("Processing Circle transfer to {} for amount {}", address, amount);
-        // TODO: Implement actual Circle API call
-        // For now, return a mock transfer ID
-        return "circle_" + System.currentTimeMillis();
+    private String getOrCreateCircleWallet(Wallet userWallet) {
+        // TODO: Store Circle wallet ID in user/wallet entity
+        // For now, create a new wallet each time
+        var walletData = circleService.createWallet("USDC Wallet for " + userWallet.getWalletAddress());
+        return walletData.getId();
+    }
+
+    /**
+     * Map payment method to Circle API format
+     */
+    private String mapPaymentMethod(String paymentMethod) {
+        if (paymentMethod == null) return "card";
+        return paymentMethod.toLowerCase();
     }
 }
