@@ -29,6 +29,7 @@ circle:
   api-key: ${CIRCLE_API_KEY}
   api-url: ${CIRCLE_API_URL:https://api.sandbox.circle.com}
   version: ${CIRCLE_VERSION:v1}
+  webhook-secret: ${CIRCLE_WEBHOOK_SECRET:your_webhook_secret_from_circle_dashboard}
 
 ethereum:
   rpc-url: ${ETHEREUM_RPC_URL:https://eth-mainnet.alchemyapi.io/v2/demo}
@@ -42,3 +43,8 @@ logging:
     org.springframework.web.reactive.function.client.ExchangeFunctions: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+# Scheduled tasks
+scheduling:
+  pool:
+    size: 2
